@@ -1,6 +1,11 @@
-AccessModifierOffset: -4
 BasedOnStyle: LLVM
+BreakConstructorInitializers: BeforeComma
+AccessModifierOffset: -4
+AlignConsecutiveDeclarations: true
+AlwaysBreakTemplateDeclarations: Yes
+ColumnLimit: 100
 IndentPPDirectives: BeforeHash
 IndentWidth: 4
+PackConstructorInitializers: Never
 PointerAlignment: Left
 SortIncludes: true

@@ -1,14 +1,37 @@
 // Copyright (c) 2024 Pyarelal Knowles, MIT License
 
-#include "nodecode/offset_ptr.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
-#include <nodecode/header.hpp>
-#include <nodecode/allocate.hpp>
-#include <gtest/gtest.h>
 #include <cstring>
+#include <gtest/gtest.h>
+#include <new>
+#include <nodecode/allocate.hpp>
+#include <nodecode/header.hpp>
+#include <nodecode/offset_ptr.hpp>
 
 using namespace nodecode;
+
+struct TestRootHeader : RootHeader {
+    TestRootHeader()
+        : RootHeader("NODECODE-TEST") {}
+};
+
+struct NullAllocator {
+    using value_type = std::byte;
+    value_type* allocate(std::size_t n) {
+        EXPECT_FALSE(allocated);
+        allocated = true;
+        (void)n;
+        return nullptr;
+    }
+    void deallocate(value_type* p, std::size_t n) noexcept {
+        EXPECT_TRUE(allocated);
+        (void)p;
+        (void)n;
+    }
+    bool allocated = false;
+};
 
 TEST(Version, Invalid) {
     Version a(1, 1, 1);
@@ -58,71 +81,84 @@ TEST(Version, CompatibleMajor) {
 }
 
 TEST(Allocate, Object) {
-    using namespace nodecode::uninitialized;
-    std::span<uint8_t> space(reinterpret_cast<uint8_t*>(0), 23);
+    linear_memory_resource<NullAllocator> memory(23);
 
     // byte can be placed anywhere
-    EXPECT_EQ(alignedAllocate<char>(space), reinterpret_cast<char*>(0));
-    EXPECT_EQ(space.data(), reinterpret_cast<uint8_t*>(1));
+    EXPECT_EQ(memory.allocate(sizeof(char), alignof(char)), reinterpret_cast<void*>(0));
+    EXPECT_EQ(memory.bytesAllocated(), 1);
 
     // int after the byte must have 3 bytes padding, placed at 4 and taking 4
-    EXPECT_EQ(alignedAllocate<int>(space), reinterpret_cast<int*>(4));
-    EXPECT_EQ(space.data(), reinterpret_cast<uint8_t*>(8));
+    EXPECT_EQ(memory.allocate(sizeof(int), alignof(int)), reinterpret_cast<void*>(4));
+    EXPECT_EQ(memory.bytesAllocated(), 8);
 
     // double after int must have 4 bytes padding, placed at 8, taking 8 more
-    EXPECT_EQ(alignedAllocate<double>(space), reinterpret_cast<double*>(8));
-    EXPECT_EQ(space.data(), reinterpret_cast<uint8_t*>(16));
+    EXPECT_EQ(memory.allocate(sizeof(double), alignof(double)), reinterpret_cast<void*>(8));
+    EXPECT_EQ(memory.bytesAllocated(), 16);
 
     // another byte to force some padding, together with another int won't fit
-    EXPECT_EQ(space.size(), 7);
-    EXPECT_EQ(alignedAllocate<char>(space), reinterpret_cast<char*>(16));
-    EXPECT_EQ(space.size(), 6); // plenty left for an int, but not aligned
-    EXPECT_THROW(alignedAllocate<int>(space), std::bad_alloc);
+    EXPECT_EQ(memory.bytesReserved() - memory.bytesAllocated(), 7);
+    EXPECT_EQ(memory.allocate(sizeof(char), alignof(char)), reinterpret_cast<void*>(16));
+    EXPECT_EQ(memory.bytesReserved() - memory.bytesAllocated(),
+              6); // plenty left for an int, but not aligned
+    EXPECT_THROW((void)memory.allocate(sizeof(int), alignof(int)), std::bad_alloc);
 }
 
 TEST(Allocate, Array) {
-    using namespace nodecode::uninitialized;
-    std::span<uint8_t> space(reinterpret_cast<uint8_t*>(0), 32);
+    linear_memory_resource<NullAllocator> memory(32);
 
     // byte can be placed anywhere
-    EXPECT_EQ(alignedAllocate<char>(space, 3).data(), reinterpret_cast<char*>(0));
-    EXPECT_EQ(space.data(), reinterpret_cast<uint8_t*>(3));
+    EXPECT_EQ(memory.allocate(sizeof(char) * 3, alignof(char)), reinterpret_cast<char*>(0));
+    EXPECT_EQ(memory.bytesAllocated(), 3);
 
     // 2 ints after the 3rd byte must have 3 bytes padding, placed at 4 and taking 8
-    EXPECT_EQ(alignedAllocate<int>(space, 2).data(), reinterpret_cast<int*>(4));
-    EXPECT_EQ(space.data(), reinterpret_cast<uint8_t*>(12));
+    EXPECT_EQ(memory.allocate(sizeof(int) * 2, alignof(int)), reinterpret_cast<int*>(4));
+    EXPECT_EQ(memory.bytesAllocated(), 12);
 
     // 2 doubles after 12 bytes must have 4 bytes padding, placed at 16, taking 16 more
-    EXPECT_EQ(alignedAllocate<double>(space, 2).data(), reinterpret_cast<double*>(16));
-    EXPECT_EQ(space.data(), reinterpret_cast<uint8_t*>(32));
+    EXPECT_EQ(memory.allocate(sizeof(double) * 2, alignof(double)), reinterpret_cast<double*>(16));
+    EXPECT_EQ(memory.bytesAllocated(), 32);
 }
 
 TEST(Allocate, Initialize) {
-    std::vector<max_align_t> fileData(1000);
-    std::span<uint8_t> space(reinterpret_cast<uint8_t*>(fileData.data()),
-                             fileData.size() * sizeof(*fileData.data()));
-    std::ranges::fill(space, 0xeeeeeeee);
+    linear_memory_resource memory(1024);
+    std::span<uint8_t>     raw = createArray<uint8_t>(memory, 1024);
+    std::ranges::fill(raw, 0xeeu);
+    memory.reset();
 
-    int* i = createLeaked<int>(space);
-    EXPECT_EQ(i, reinterpret_cast<int*>(fileData.data()));
+    int* i = create<int>(memory);
+    EXPECT_EQ(i, reinterpret_cast<int*>(raw.data()));
     EXPECT_EQ(*i, 0);
 
-    int* j = emplaceLeaked<int>(space, 42);
+    int* j = create<int>(memory, 42);
     EXPECT_EQ(i + 1, j);
     EXPECT_EQ(*j, 42);
 
-    std::span<int> span = createLeaked<int>(space, 10);
+    std::span<int> span = createArray<int>(memory, 10);
     EXPECT_EQ(j + 1, span.data());
     EXPECT_EQ(span[0], 0);
 
-    std::span<int> span2 = emplaceRangeLeaked(space, std::vector{0, 1, 2});
+    std::span<int> span2 = createArray(memory, std::vector{0, 1, 2});
     EXPECT_EQ(span2[0], 0);
     EXPECT_EQ(span2[1], 1);
     EXPECT_EQ(span2[2], 2);
 }
 
+TEST(Allocate, Vector) {
+    linear_memory_resource alloc(30);
+    EXPECT_EQ(alloc.bytesAllocated(), 0);
+    EXPECT_EQ(alloc.bytesReserved(), 30);
+
+    // Yes, this is possible but don't do it. std::vector can easily reallocate
+    // which will leave unused holes in the linear allocator.
+    std::vector<uint8_t, linear_allocator<uint8_t>> vec(10, alloc);
+    EXPECT_EQ(alloc.bytesAllocated(), 10);
+    vec.reserve(20);
+    EXPECT_EQ(alloc.bytesAllocated(), 30);
+    EXPECT_THROW(vec.reserve(21), std::bad_alloc);
+}
+
 TEST(Header, Magic) {
-    RootHeader rootHeader;
+    RootHeader rootHeader("test");
     EXPECT_EQ(rootHeader.nodecodeMagic, RootHeader::NodecodeMagic);
     EXPECT_TRUE(rootHeader.magicValid());
     rootHeader.nodecodeMagic[10] = 'a';
@@ -130,37 +166,37 @@ TEST(Header, Magic) {
 }
 
 struct Ext1 : Header {
-    static constexpr Magic HeaderIdentifier{0, 0, 0, 0, 'a'};
-    int data[10];
+    static constexpr Magic HeaderIdentifier{"    a"};
+    int                    data[10];
 };
 
 struct Ext2 : Header {
-    static constexpr Magic HeaderIdentifier{0, 0, 0, 0, 'b'};
-    int data[100];
+    static constexpr Magic HeaderIdentifier{"    b"};
+    int                    data[100];
 };
 
 TEST(Header, SubHeaders) {
     struct File {
-        RootHeader rootHeader;
-        Ext1 ext1s[50];
-        Ext2 ext2s[50];
+        File()
+            : rootHeader("test") {}
+        RootHeader         rootHeader;
+        Ext1               ext1s[50];
+        Ext2               ext2s[50];
         offset_ptr<Header> headers[100];
     };
 
     File file;
     file.rootHeader.headers = file.headers;
-    size_t nextIndex = 0;
+    size_t   nextIndex = 0;
     uint32_t nextId = 123;
-    for(auto& e : file.ext1s)
-    {
+    for (auto& e : file.ext1s) {
         file.headers[nextIndex++] = &e;
 
         // Make this header look like something else to avoid duplicates
         e.identifier.fill(0);
         memcpy(&e.identifier.front(), &++nextId, sizeof(nextId));
     }
-    for(auto& e : file.ext2s)
-    {
+    for (auto& e : file.ext2s) {
         file.headers[nextIndex++] = &e;
 
         // Make this header look like something else to avoid duplicates
@@ -188,27 +224,25 @@ TEST(Header, SubHeaders) {
 }
 
 struct AppHeader : nodecode::Header {
-    static constexpr Magic HeaderIdentifier{'A', 'P', 'P'};
+    static constexpr Magic   HeaderIdentifier{"APP"};
     static constexpr Version VersionSupported{1, 0, 0};
     AppHeader()
-        : nodecode::Header{.identifier = HeaderIdentifier,
-                            .version = VersionSupported} {}
+        : nodecode::Header{
+              .identifier = HeaderIdentifier, .version = VersionSupported, .gitHash = "unknown"} {}
     nodecode::offset_span<int> data;
 };
 
-void writeFile(std::span<uint8_t>& space, int fillValue)
-{
+void writeFile(linear_memory_resource<>& memory, int fillValue) {
     // RootHeader must be first
-    nodecode::RootHeader* rootHeader = nodecode::createLeaked<nodecode::RootHeader>(space);
+    TestRootHeader* rootHeader = nodecode::create<TestRootHeader>(memory);
 
     // Allocate the array of sub-headers
-    rootHeader->headers =
-        nodecode::createLeaked<nodecode::offset_ptr<nodecode::Header>>(space, 1);
+    rootHeader->headers = nodecode::createArray<nodecode::offset_ptr<nodecode::Header>>(memory, 1);
 
     // Allocate the app header, its data and populate it
-    AppHeader* appHeader = nodecode::createLeaked<AppHeader>(space);
+    AppHeader* appHeader = nodecode::create<AppHeader>(memory);
 
-    appHeader->data = nodecode::createLeaked<int>(space, 100);
+    appHeader->data = nodecode::createArray<int>(memory, 100);
     std::ranges::fill(appHeader->data, fillValue);
 
     // Add the app header the root and sort the array (of one item in this case)
@@ -218,21 +252,20 @@ void writeFile(std::span<uint8_t>& space, int fillValue)
 
 TEST(Header, Readme) {
     // Create a "file"
-    std::vector<max_align_t> fileData(1000);
-    std::span<uint8_t> space(reinterpret_cast<uint8_t*>(fileData.data()),
-                             fileData.size() * sizeof(*fileData.data()));
-    writeFile(space, 42);
+    linear_memory_resource memory(1000);
+    writeFile(memory, 42);
+    EXPECT_EQ(memory.bytesAllocated(), 568);
 
     // "Load" the file; could be memory mapped - no time spent decoding or
     // deserializing!
-    auto* root = reinterpret_cast<nodecode::RootHeader*>(fileData.data());
+    auto* root = reinterpret_cast<nodecode::RootHeader*>(memory.arena());
 
     // Directly access the file, only reading the parts you need
     EXPECT_TRUE(root->binaryCompatible());
     auto* appHeader = root->find<AppHeader>();
     ASSERT_NE(appHeader, nullptr);
-    EXPECT_TRUE(nodecode::Version::binaryCompatible(AppHeader::VersionSupported,
-                                                    appHeader->version));
+    EXPECT_TRUE(
+        nodecode::Version::binaryCompatible(AppHeader::VersionSupported, appHeader->version));
 
     // The offset_span accessor, data points to an arbitrary location in the
     // file, not inside the header

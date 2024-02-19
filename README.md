@@ -24,21 +24,20 @@ data to headers:
 
 ```
 // Create a "file"
-std::vector<max_align_t> fileData(1000);
-std::span<uint8_t> space(reinterpret_cast<uint8_t*>(fileData.data()),
-                            fileData.size() * sizeof(*fileData.data()));
-writeFile(space, 42);
+linear_memory_resource memory(1000);
+writeFile(memory, 42);
+EXPECT_EQ(memory.bytesAllocated(), 568);
 
 // "Load" the file; could be memory mapped - no time spent decoding or
 // deserializing!
-auto* root = reinterpret_cast<nodecode::RootHeader*>(fileData.data());
+auto* root = reinterpret_cast<nodecode::RootHeader*>(memory.arena());
 
 // Directly access the file, only reading the parts you need
 EXPECT_TRUE(root->binaryCompatible());
 auto* appHeader = root->find<AppHeader>();
 ASSERT_NE(appHeader, nullptr);
-EXPECT_TRUE(nodecode::Version::binaryCompatible(AppHeader::VersionSupported,
-                                                appHeader->version));
+EXPECT_TRUE(
+    nodecode::Version::binaryCompatible(AppHeader::VersionSupported, appHeader->version));
 
 // The offset_span accessor, data points to an arbitrary location in the
 // file, not inside the header
@@ -47,19 +46,17 @@ EXPECT_EQ(appHeader->data.back(), 42);
 
 ...
 
-void writeFile(std::span<uint8_t>& space, int fillValue)
-{
+void writeFile(linear_memory_resource<>& memory, int fillValue) {
     // RootHeader must be first
-    nodecode::RootHeader* rootHeader = nodecode::createLeaked<nodecode::RootHeader>(space);
+    TestRootHeader* rootHeader = nodecode::create<TestRootHeader>(memory);
 
     // Allocate the array of sub-headers
-    rootHeader->headers =
-        nodecode::createLeaked<nodecode::offset_ptr<nodecode::Header>>(space, 1);
+    rootHeader->headers = nodecode::createArray<nodecode::offset_ptr<nodecode::Header>>(memory, 1);
 
     // Allocate the app header, its data and populate it
-    AppHeader* appHeader = nodecode::createLeaked<AppHeader>(space);
+    AppHeader* appHeader = nodecode::create<AppHeader>(memory);
 
-    appHeader->data = nodecode::createLeaked<int>(space, 100);
+    appHeader->data = nodecode::createArray<int>(memory, 100);
     std::ranges::fill(appHeader->data, fillValue);
 
     // Add the app header the root and sort the array (of one item in this case)
