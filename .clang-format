@@ -6,6 +6,7 @@ AlwaysBreakTemplateDeclarations: Yes
 ColumnLimit: 100
 IndentPPDirectives: BeforeHash
 IndentWidth: 4
+InsertNewlineAtEOF: true
 PackConstructorInitializers: Never
 PointerAlignment: Left
 SortIncludes: true

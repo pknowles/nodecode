@@ -6,15 +6,15 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <new>
-#include <nodecode/allocate.hpp>
-#include <nodecode/header.hpp>
-#include <nodecode/offset_ptr.hpp>
+#include <decodeless/allocator.hpp>
+#include <decodeless/header.hpp>
+#include <decodeless/offset_ptr.hpp>
 
-using namespace nodecode;
+using namespace decodeless;
 
 struct TestRootHeader : RootHeader {
     TestRootHeader()
-        : RootHeader("NODECODE-TEST") {}
+        : RootHeader("DECODELESS-TEST") {}
 };
 
 struct NullAllocator {
@@ -143,7 +143,36 @@ TEST(Allocate, Initialize) {
     EXPECT_EQ(span2[2], 2);
 }
 
+// Relaxed test case for MSVC where the debug vector allocates extra crap
+TEST(Allocate, VectorRelaxed) {
+    linear_memory_resource alloc(100);
+    EXPECT_EQ(alloc.bytesAllocated(), 0);
+    EXPECT_EQ(alloc.bytesReserved(), 100);
+    std::vector<uint8_t, linear_allocator<uint8_t>> vec(10, alloc);
+    EXPECT_GE(alloc.bytesAllocated(), 10);
+    auto allocated = alloc.bytesAllocated();
+    vec.reserve(20);
+    EXPECT_GT(alloc.bytesAllocated(), allocated);
+    EXPECT_THROW(vec.reserve(100), std::bad_alloc);
+}
+
 TEST(Allocate, Vector) {
+    bool debug =
+#if defined(NDEBUG)
+        false;
+#else
+        true;
+#endif
+    bool msvc =
+#if defined(_MSC_VER)
+        true;
+#else
+        false;
+#endif
+    if (debug && msvc) {
+        GTEST_SKIP() << "Skipping test - msvc debug vector makes extraneous allocations";
+    }
+
     linear_memory_resource alloc(30);
     EXPECT_EQ(alloc.bytesAllocated(), 0);
     EXPECT_EQ(alloc.bytesReserved(), 30);
@@ -159,9 +188,9 @@ TEST(Allocate, Vector) {
 
 TEST(Header, Magic) {
     RootHeader rootHeader("test");
-    EXPECT_EQ(rootHeader.nodecodeMagic, RootHeader::NodecodeMagic);
+    EXPECT_EQ(rootHeader.decodelessMagic, RootHeader::DecodelessMagic);
     EXPECT_TRUE(rootHeader.magicValid());
-    rootHeader.nodecodeMagic[10] = 'a';
+    rootHeader.decodelessMagic[10] = 'a';
     EXPECT_FALSE(rootHeader.magicValid());
 }
 
@@ -223,26 +252,26 @@ TEST(Header, SubHeaders) {
     EXPECT_EQ(file.rootHeader.find<Ext2>(), &file.ext2s[17]);
 }
 
-struct AppHeader : nodecode::Header {
+struct AppHeader : decodeless::Header {
     static constexpr Magic   HeaderIdentifier{"APP"};
     static constexpr Version VersionSupported{1, 0, 0};
     AppHeader()
-        : nodecode::Header{
+        : decodeless::Header{
               .identifier = HeaderIdentifier, .version = VersionSupported, .gitHash = "unknown"} {}
-    nodecode::offset_span<int> data;
+    decodeless::offset_span<int> data;
 };
 
 void writeFile(linear_memory_resource<>& memory, int fillValue) {
     // RootHeader must be first
-    TestRootHeader* rootHeader = nodecode::create<TestRootHeader>(memory);
+    TestRootHeader* rootHeader = decodeless::create<TestRootHeader>(memory);
 
     // Allocate the array of sub-headers
-    rootHeader->headers = nodecode::createArray<nodecode::offset_ptr<nodecode::Header>>(memory, 1);
+    rootHeader->headers = decodeless::createArray<decodeless::offset_ptr<decodeless::Header>>(memory, 1);
 
     // Allocate the app header, its data and populate it
-    AppHeader* appHeader = nodecode::create<AppHeader>(memory);
+    AppHeader* appHeader = decodeless::create<AppHeader>(memory);
 
-    appHeader->data = nodecode::createArray<int>(memory, 100);
+    appHeader->data = decodeless::createArray<int>(memory, 100);
     std::ranges::fill(appHeader->data, fillValue);
 
     // Add the app header the root and sort the array (of one item in this case)
@@ -258,14 +287,14 @@ TEST(Header, Readme) {
 
     // "Load" the file; could be memory mapped - no time spent decoding or
     // deserializing!
-    auto* root = reinterpret_cast<nodecode::RootHeader*>(memory.arena());
+    auto* root = reinterpret_cast<decodeless::RootHeader*>(memory.arena());
 
     // Directly access the file, only reading the parts you need
     EXPECT_TRUE(root->binaryCompatible());
     auto* appHeader = root->find<AppHeader>();
     ASSERT_NE(appHeader, nullptr);
     EXPECT_TRUE(
-        nodecode::Version::binaryCompatible(AppHeader::VersionSupported, appHeader->version));
+        decodeless::Version::binaryCompatible(AppHeader::VersionSupported, appHeader->version));
 
     // The offset_span accessor, data points to an arbitrary location in the
     // file, not inside the header

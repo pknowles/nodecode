@@ -5,13 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <bitset>
-#include <cassert>
 #include <cstdint>
-#include <nodecode/offset_ptr.hpp>
-#include <nodecode/offset_span.hpp>
+#include <decodeless/offset_ptr.hpp>
+#include <decodeless/offset_span.hpp>
 #include <string>
 
-namespace nodecode {
+namespace decodeless {
 
 struct Version {
     static constexpr uint32_t InvalidValue = 0xffffffff;
@@ -30,11 +29,13 @@ struct Version {
 static constexpr Version VersionSupported{0, 1, 0};
 
 struct GitHash : public std::array<char, 40> {
-    constexpr GitHash() : std::array<char, 40>() {
+    constexpr GitHash()
+        : std::array<char, 40>() {
         std::fill(this->begin(), this->end(), 0);
     }
     template <size_t N>
-    constexpr GitHash(const char (&str)[N]) : std::array<char, 40>() {
+    constexpr GitHash(const char (&str)[N])
+        : std::array<char, 40>() {
         static_assert(N - 1 <= 40, "GitHash must be at most 40 bytes");
         std::copy_n(str, N - 1, this->begin());
     }
@@ -45,11 +46,13 @@ struct Magic : public std::array<char, 16> {
         return std::string(begin(), end()) <
                std::string(other.begin(), other.end());
     }
-    constexpr Magic() : std::array<char, 16>() {
+    constexpr Magic()
+        : std::array<char, 16>() {
         std::fill(this->begin(), this->end(), 0);
     }
     template <size_t N>
-    constexpr Magic(const char (&str)[N]) : std::array<char, 16>() {
+    constexpr Magic(const char (&str)[N])
+        : std::array<char, 16>() {
         static_assert(N - 1 <= 16, "Magic must be at most 16 bytes");
         std::copy_n(str, N - 1, this->begin());
     }
@@ -62,10 +65,8 @@ enum PlatformFlags {
     ePlatformEndianLittle,
 };
 
-struct PlatformBits : std::bitset<64>
-{
-    PlatformBits()
-    {
+struct PlatformBits : std::bitset<64> {
+    PlatformBits() {
         this->set(PlatformFlags::ePlatformX32, sizeof(size_t) == 4);
         this->set(PlatformFlags::ePlatformX64, sizeof(size_t) == 8);
         this->set(PlatformFlags::ePlatformEndianBig, std::endian::native == std::endian::big);
@@ -89,7 +90,8 @@ struct RootHeader {
 
     using HeaderList = offset_span<offset_ptr<Header>>;
 
-    RootHeader(Magic identifier) : identifier(identifier){};
+    RootHeader(Magic identifier)
+        : identifier(identifier){};
 
     // Find and cast a specific header
     template <class HeaderType>
@@ -117,25 +119,22 @@ struct RootHeader {
                    : reinterpret_cast<HeaderType*>(result->get());
     }
 
-    bool magicValid() const { return nodecodeMagic == NodecodeMagic; }
+    bool magicValid() const { return decodelessMagic == DecodelessMagic; }
     bool binaryCompatible() const {
-        return Version::binaryCompatible(VersionSupported, nodecodeVersion) &&
+        return Version::binaryCompatible(VersionSupported, decodelessVersion) &&
                platformBits == PlatformBits();
     }
 
-    static constexpr Magic NodecodeMagic{"NODECODE FILE>>>"};
-    //{'N', 'O', 'D', 'E', 'C', 'O',
-    //                                        'D', 'E', ' ', 'F', 'I', 'L',
-    //                                        'E', '>', '>', '>'};
+    static constexpr Magic DecodelessMagic{"DECODELESS->FILE"};
 
     // User's magic string for file contents, e.g. matching the app headers
     Magic identifier;
 
-    // Identifies nodecode_header compatible files
-    Magic nodecodeMagic = NodecodeMagic;
+    // Identifies decodeless::RootHeader compatible files
+    Magic decodelessMagic = DecodelessMagic;
 
     // Version of this top level header
-    Version nodecodeVersion = VersionSupported;
+    Version decodelessVersion = VersionSupported;
 
     // Platform flags that might indicate binary incompatibility if they differ
     PlatformBits platformBits;
@@ -160,4 +159,4 @@ struct RootHeader {
     };
 };
 
-} // namespace nodecode
+} // namespace decodeless
