@@ -9,8 +9,16 @@
 #include <decodeless/allocator.hpp>
 #include <decodeless/header.hpp>
 #include <decodeless/offset_ptr.hpp>
+#include <type_traits>
 
 using namespace decodeless;
+
+static_assert(std::is_trivially_destructible_v<Version>);
+static_assert(std::is_trivially_destructible_v<GitHash>);
+static_assert(std::is_trivially_destructible_v<Magic>);
+static_assert(std::is_trivially_destructible_v<PlatformBits>);
+static_assert(std::is_trivially_destructible_v<Header>);
+static_assert(std::is_trivially_destructible_v<RootHeader>);
 
 struct TestRootHeader : RootHeader {
     TestRootHeader()
@@ -34,7 +42,7 @@ struct NullAllocator {
 };
 
 TEST(Version, Invalid) {
-    Version a(1, 1, 1);
+    Version a{1, 1, 1};
     Version b;
     EXPECT_FALSE(Version::binaryCompatible(a, b));
     EXPECT_FALSE(Version::binaryCompatible(b, b));
@@ -42,9 +50,9 @@ TEST(Version, Invalid) {
 }
 
 TEST(Version, CompatiblePatch) {
-    Version a(2, 2, 1);
-    Version b(2, 2, 2);
-    Version c(2, 2, 3);
+    Version a{2, 2, 1};
+    Version b{2, 2, 2};
+    Version c{2, 2, 3};
     EXPECT_TRUE(Version::binaryCompatible(a, a));
     EXPECT_TRUE(Version::binaryCompatible(a, b));
     EXPECT_TRUE(Version::binaryCompatible(a, c));
@@ -55,9 +63,9 @@ TEST(Version, CompatiblePatch) {
 }
 
 TEST(Version, CompatibleMinor) {
-    Version a(2, 1, 2);
-    Version b(2, 2, 2);
-    Version c(2, 3, 2);
+    Version a{2, 1, 2};
+    Version b{2, 2, 2};
+    Version c{2, 3, 2};
     EXPECT_TRUE(Version::binaryCompatible(a, a));
     EXPECT_FALSE(Version::binaryCompatible(a, b));
     EXPECT_FALSE(Version::binaryCompatible(a, c));
@@ -68,9 +76,9 @@ TEST(Version, CompatibleMinor) {
 }
 
 TEST(Version, CompatibleMajor) {
-    Version a(1, 2, 2);
-    Version b(2, 2, 2);
-    Version c(3, 2, 2);
+    Version a{1, 2, 2};
+    Version b{2, 2, 2};
+    Version c{3, 2, 2};
     EXPECT_TRUE(Version::binaryCompatible(a, a));
     EXPECT_FALSE(Version::binaryCompatible(a, b));
     EXPECT_FALSE(Version::binaryCompatible(a, c));
@@ -195,12 +203,12 @@ TEST(Header, Magic) {
 }
 
 struct Ext1 : Header {
-    static constexpr Magic HeaderIdentifier{"    a"};
+    static constexpr const Magic HeaderIdentifier{"    a"};
     int                    data[10];
 };
 
 struct Ext2 : Header {
-    static constexpr Magic HeaderIdentifier{"    b"};
+    static constexpr const Magic HeaderIdentifier{"    b"};
     int                    data[100];
 };
 
@@ -260,6 +268,8 @@ struct AppHeader : decodeless::Header {
               .identifier = HeaderIdentifier, .version = VersionSupported, .gitHash = "unknown"} {}
     decodeless::offset_span<int> data;
 };
+
+static_assert(decodeless::SubHeader<AppHeader>);
 
 void writeFile(linear_memory_resource<>& memory, int fillValue) {
     // RootHeader must be first

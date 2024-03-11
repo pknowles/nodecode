@@ -9,6 +9,7 @@
 #include <decodeless/offset_ptr.hpp>
 #include <decodeless/offset_span.hpp>
 #include <string>
+#include <bit>
 
 namespace decodeless {
 
@@ -74,9 +75,9 @@ struct PlatformBits : std::bitset<64> {
     }
 };
 
+// Inherit from Header to add custom headers to the RootHeader
+// Must have a static Magic HeaderIdentifier, matching the SubHeader concept.
 struct Header {
-    // Must have a static Magic HeaderIdentifier;
-
     Magic identifier;
     Version version;
     GitHash gitHash;
@@ -86,6 +87,14 @@ struct Header {
     }
 };
 
+template <typename T>
+concept SubHeader =
+    std::is_base_of_v<Header, T> && std::is_same_v<decltype(T::HeaderIdentifier), const Magic>;
+
+// Top level file header with a magic identifier and references to custom
+// headers that can then point to real data. Sub headers are idenitified with
+// their own magic strings and version numbers. The indirection allows extending
+// existing data in a stable header with data in a new header.
 struct RootHeader {
 
     using HeaderList = offset_span<offset_ptr<Header>>;
@@ -94,8 +103,7 @@ struct RootHeader {
         : identifier(identifier){};
 
     // Find and cast a specific header
-    template <class HeaderType>
-        requires std::is_base_of_v<Header, HeaderType>
+    template <SubHeader HeaderType>
     inline HeaderType* find() const {
         constexpr Magic headerIdentifier =
             HeaderType::HeaderIdentifier;
