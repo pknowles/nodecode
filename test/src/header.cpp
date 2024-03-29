@@ -203,12 +203,12 @@ TEST(Header, Magic) {
 }
 
 struct Ext1 : Header {
-    static constexpr const Magic HeaderIdentifier{"    a"};
+    static constexpr Magic HeaderIdentifier{"    a"};
     int                    data[10];
 };
 
 struct Ext2 : Header {
-    static constexpr const Magic HeaderIdentifier{"    b"};
+    static constexpr Magic HeaderIdentifier{"    b"};
     int                    data[100];
 };
 
