@@ -27,8 +27,6 @@ struct Version {
     }
 };
 
-static constexpr Version VersionSupported{0, 1, 0};
-
 struct GitHash : public std::array<char, 40> {
     constexpr GitHash()
         : std::array<char, 40>() {
@@ -91,6 +89,10 @@ template <typename T>
 concept SubHeader =
     std::is_base_of_v<Header, T> && std::is_same_v<decltype(T::HeaderIdentifier), const Magic>;
 
+template <typename T>
+concept VersionedSubHeader =
+    SubHeader<T> && std::is_same_v<decltype(T::VersionSupported), const Version>;
+
 // Top level file header with a magic identifier and references to custom
 // headers that can then point to real data. Sub headers are idenitified with
 // their own magic strings and version numbers. The indirection allows extending
@@ -127,6 +129,16 @@ struct RootHeader {
                    : reinterpret_cast<HeaderType*>(result->get());
     }
 
+    template <VersionedSubHeader HeaderType>
+    inline HeaderType* findSupported() const {
+        HeaderType*       result = find<HeaderType>();
+        constexpr Version versionSupported = HeaderType::VersionSupported;
+        // TODO: might be nice to throw or return std::expected to differentiate
+        // header exists but not compatible vs not found.
+        return result && Version::binaryCompatible(versionSupported, result->version) ? result
+                                                                                      : nullptr;
+    }
+
     bool magicValid() const { return decodelessMagic == DecodelessMagic; }
     bool binaryCompatible() const {
         return Version::binaryCompatible(VersionSupported, decodelessVersion) &&
@@ -142,6 +154,7 @@ struct RootHeader {
     Magic decodelessMagic = DecodelessMagic;
 
     // Version of this top level header
+    static constexpr Version VersionSupported{0, 1, 0};
     Version decodelessVersion = VersionSupported;
 
     // Platform flags that might indicate binary incompatibility if they differ
