@@ -31,11 +31,11 @@ data to headers:
 // Create a "file"
 linear_memory_resource memory(1000);
 writeFile(memory, 42);
-EXPECT_EQ(memory.bytesAllocated(), 568);
+EXPECT_EQ(memory.size(), 568);
 
 // "Load" the file; could be memory mapped - no time spent decoding or
 // deserializing!
-auto* root = reinterpret_cast<decodeless::RootHeader*>(memory.arena());
+auto* root = reinterpret_cast<decodeless::RootHeader*>(memory.data());
 
 // Directly access the file, only reading the parts you need
 EXPECT_TRUE(root->binaryCompatible());
