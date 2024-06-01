@@ -4,11 +4,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <gtest/gtest.h>
-#include <new>
 #include <decodeless/allocator.hpp>
+#include <decodeless/allocator_construction.hpp>
 #include <decodeless/header.hpp>
 #include <decodeless/offset_ptr.hpp>
+#include <gtest/gtest.h>
+#include <new>
 #include <type_traits>
 
 using namespace decodeless;
@@ -93,20 +94,20 @@ TEST(Allocate, Object) {
 
     // byte can be placed anywhere
     EXPECT_EQ(memory.allocate(sizeof(char), alignof(char)), reinterpret_cast<void*>(0));
-    EXPECT_EQ(memory.bytesAllocated(), 1);
+    EXPECT_EQ(memory.size(), 1);
 
     // int after the byte must have 3 bytes padding, placed at 4 and taking 4
     EXPECT_EQ(memory.allocate(sizeof(int), alignof(int)), reinterpret_cast<void*>(4));
-    EXPECT_EQ(memory.bytesAllocated(), 8);
+    EXPECT_EQ(memory.size(), 8);
 
     // double after int must have 4 bytes padding, placed at 8, taking 8 more
     EXPECT_EQ(memory.allocate(sizeof(double), alignof(double)), reinterpret_cast<void*>(8));
-    EXPECT_EQ(memory.bytesAllocated(), 16);
+    EXPECT_EQ(memory.size(), 16);
 
     // another byte to force some padding, together with another int won't fit
-    EXPECT_EQ(memory.bytesReserved() - memory.bytesAllocated(), 7);
+    EXPECT_EQ(memory.capacity() - memory.size(), 7);
     EXPECT_EQ(memory.allocate(sizeof(char), alignof(char)), reinterpret_cast<void*>(16));
-    EXPECT_EQ(memory.bytesReserved() - memory.bytesAllocated(),
+    EXPECT_EQ(memory.capacity() - memory.size(),
               6); // plenty left for an int, but not aligned
     EXPECT_THROW((void)memory.allocate(sizeof(int), alignof(int)), std::bad_alloc);
 }
@@ -116,36 +117,36 @@ TEST(Allocate, Array) {
 
     // byte can be placed anywhere
     EXPECT_EQ(memory.allocate(sizeof(char) * 3, alignof(char)), reinterpret_cast<char*>(0));
-    EXPECT_EQ(memory.bytesAllocated(), 3);
+    EXPECT_EQ(memory.size(), 3);
 
     // 2 ints after the 3rd byte must have 3 bytes padding, placed at 4 and taking 8
     EXPECT_EQ(memory.allocate(sizeof(int) * 2, alignof(int)), reinterpret_cast<int*>(4));
-    EXPECT_EQ(memory.bytesAllocated(), 12);
+    EXPECT_EQ(memory.size(), 12);
 
     // 2 doubles after 12 bytes must have 4 bytes padding, placed at 16, taking 16 more
     EXPECT_EQ(memory.allocate(sizeof(double) * 2, alignof(double)), reinterpret_cast<double*>(16));
-    EXPECT_EQ(memory.bytesAllocated(), 32);
+    EXPECT_EQ(memory.size(), 32);
 }
 
 TEST(Allocate, Initialize) {
     linear_memory_resource memory(1024);
-    std::span<uint8_t>     raw = createArray<uint8_t>(memory, 1024);
+    std::span<uint8_t>     raw = create::array<uint8_t>(memory, 1024);
     std::ranges::fill(raw, 0xeeu);
     memory.reset();
 
-    int* i = create<int>(memory);
+    int* i = create::object<int>(memory);
     EXPECT_EQ(i, reinterpret_cast<int*>(raw.data()));
     EXPECT_EQ(*i, 0);
 
-    int* j = create<int>(memory, 42);
+    int* j = create::object<int>(memory, 42);
     EXPECT_EQ(i + 1, j);
     EXPECT_EQ(*j, 42);
 
-    std::span<int> span = createArray<int>(memory, 10);
+    std::span<int> span = create::array<int>(memory, 10);
     EXPECT_EQ(j + 1, span.data());
     EXPECT_EQ(span[0], 0);
 
-    std::span<int> span2 = createArray(memory, std::vector{0, 1, 2});
+    std::span<int> span2 = create::array(memory, std::vector{0, 1, 2});
     EXPECT_EQ(span2[0], 0);
     EXPECT_EQ(span2[1], 1);
     EXPECT_EQ(span2[2], 2);
@@ -154,13 +155,13 @@ TEST(Allocate, Initialize) {
 // Relaxed test case for MSVC where the debug vector allocates extra crap
 TEST(Allocate, VectorRelaxed) {
     linear_memory_resource alloc(100);
-    EXPECT_EQ(alloc.bytesAllocated(), 0);
-    EXPECT_EQ(alloc.bytesReserved(), 100);
+    EXPECT_EQ(alloc.size(), 0);
+    EXPECT_EQ(alloc.capacity(), 100);
     std::vector<uint8_t, linear_allocator<uint8_t>> vec(10, alloc);
-    EXPECT_GE(alloc.bytesAllocated(), 10);
-    auto allocated = alloc.bytesAllocated();
+    EXPECT_GE(alloc.size(), 10);
+    auto allocated = alloc.size();
     vec.reserve(20);
-    EXPECT_GT(alloc.bytesAllocated(), allocated);
+    EXPECT_GT(alloc.size(), allocated);
     EXPECT_THROW(vec.reserve(100), std::bad_alloc);
 }
 
@@ -182,15 +183,15 @@ TEST(Allocate, Vector) {
     }
 
     linear_memory_resource alloc(30);
-    EXPECT_EQ(alloc.bytesAllocated(), 0);
-    EXPECT_EQ(alloc.bytesReserved(), 30);
+    EXPECT_EQ(alloc.size(), 0);
+    EXPECT_EQ(alloc.capacity(), 30);
 
     // Yes, this is possible but don't do it. std::vector can easily reallocate
     // which will leave unused holes in the linear allocator.
     std::vector<uint8_t, linear_allocator<uint8_t>> vec(10, alloc);
-    EXPECT_EQ(alloc.bytesAllocated(), 10);
+    EXPECT_EQ(alloc.size(), 10);
     vec.reserve(20);
-    EXPECT_EQ(alloc.bytesAllocated(), 30);
+    EXPECT_EQ(alloc.size(), 30);
     EXPECT_THROW(vec.reserve(21), std::bad_alloc);
 }
 
@@ -273,15 +274,15 @@ static_assert(decodeless::SubHeader<AppHeader>);
 
 void writeFile(linear_memory_resource<>& memory, int fillValue) {
     // RootHeader must be first
-    TestRootHeader* rootHeader = decodeless::create<TestRootHeader>(memory);
+    TestRootHeader* rootHeader = create::object<TestRootHeader>(memory);
 
     // Allocate the array of sub-headers
-    rootHeader->headers = decodeless::createArray<decodeless::offset_ptr<decodeless::Header>>(memory, 1);
+    rootHeader->headers = create::array<decodeless::offset_ptr<decodeless::Header>>(memory, 1);
 
     // Allocate the app header, its data and populate it
-    AppHeader* appHeader = decodeless::create<AppHeader>(memory);
+    AppHeader* appHeader = create::object<AppHeader>(memory);
 
-    appHeader->data = decodeless::createArray<int>(memory, 100);
+    appHeader->data = create::array<int>(memory, 100);
     std::ranges::fill(appHeader->data, fillValue);
 
     // Add the app header the root and sort the array (of one item in this case)
@@ -293,11 +294,11 @@ TEST(Header, Readme) {
     // Create a "file"
     linear_memory_resource memory(1000);
     writeFile(memory, 42);
-    EXPECT_EQ(memory.bytesAllocated(), 568);
+    EXPECT_EQ(memory.size(), 568);
 
     // "Load" the file; could be memory mapped - no time spent decoding or
     // deserializing!
-    auto* root = reinterpret_cast<decodeless::RootHeader*>(memory.arena());
+    auto* root = reinterpret_cast<decodeless::RootHeader*>(memory.data());
 
     // Directly access the file, only reading the parts you need
     EXPECT_TRUE(root->binaryCompatible());
