@@ -15,8 +15,10 @@ endif()
 
 if(NOT TARGET decodeless::allocator)
   if(DECODELESS_SEARCH_DEPENDENCIES)
+    option(DECODELESS_ALLOCATOR_SEARCH_PATH
+           "${CMAKE_CURRENT_LIST_DIR}/../allocator")
     find_package(decodeless_allocator REQUIRED CONFIG PATHS
-                 "${CMAKE_CURRENT_LIST_DIR}/../../allocator")
+                 "${DECODELESS_ALLOCATOR_SEARCH_PATH}")
   elseif(DECODELESS_FETCH_DEPENDENCIES)
     include(FetchContent)
     FetchContent_Declare(
